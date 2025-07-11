@@ -1,0 +1,85 @@
+generator client {
+    provider = "prisma-client-js"
+    binaryTargets = ["native", "linux-musl-arm64-openssl-3.0.x"]
+    output = "/home/ubuntu/wire-payment-dashboard/app/node_modules/.prisma/client"
+}
+
+datasource db {
+    provider = "postgresql"
+    url      = env("DATABASE_URL")
+}
+
+model WirePayment {
+  id                    String   @id @default(cuid())
+  dba                   String   // Merchant DBA name
+  cid                   String?  // Contract ID (nullable for unknown payments) - kept for backward compatibility
+  expectedAmount        Decimal  @db.Decimal(10, 2)
+  actualAmount          Decimal  @db.Decimal(10, 2)
+  ptp                   Boolean  @default(false) // Pay to Pay flag
+  status                PaymentStatus @default(PENDING)
+  notesForTreasury      String?  // Optional notes
+  expectedDate          DateTime?
+  actualDateReceived    DateTime
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  processedBy           String?  // User who processed the payment
+  autoCleared           Boolean  @default(false) // Track if payment was auto-cleared
+  isReverted            Boolean  @default(false) // Track if payment has been reverted
+  originalStatus        PaymentStatus? // Store original status before reversal
+  revertedAt            DateTime? // When the payment was reverted
+  revertedBy            String?   // User who reverted the payment
+  backendTransactionId  String?   // Backend system transaction ID for manual posts
+  hasMultipleContracts  Boolean  @default(false) // Track if payment has multiple contract allocations
+  
+  // Relationships
+  auditLogs             AuditLog[]
+  contractAllocations   ContractAllocation[]
+  
+  @@map("wire_payments")
+}
+
+model ContractAllocation {
+  id                String      @id @default(cuid())
+  wirePaymentId     String
+  contractId        String      // Contract ID for this allocation
+  amount            Decimal     @db.Decimal(10, 2) // Amount allocated to this contract
+  percentage        Decimal?    @db.Decimal(5, 2) // Percentage of total payment (optional)
+  glAccount         String?     // GL account for this allocation
+  transactionId     String?     // Backend transaction ID for this specific allocation
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  
+  // Relationships
+  wirePayment       WirePayment @relation(fields: [wirePaymentId], references: [id], onDelete: Cascade)
+  
+  @@map("contract_allocations")
+}
+
+model AuditLog {
+  id              String      @id @default(cuid())
+  wirePaymentId   String
+  userId          String      // User who performed the action
+  action          String      // Action performed (e.g., "STATUS_CHANGED", "MANUAL_POST", "CLEARED", "REVERTED", "AUTO_CLEARED")
+  previousValue   String?     // Previous value (for tracking changes)
+  newValue        String?     // New value
+  details         String?     // Additional details about the action
+  timestamp       DateTime    @default(now())
+  isRevertible    Boolean     @default(false) // Track if this action can be reverted
+  revertedAt      DateTime?   // When this action was reverted
+  revertedBy      String?     // User who reverted this action
+  
+  // Relationships
+  wirePayment     WirePayment @relation(fields: [wirePaymentId], references: [id], onDelete: Cascade)
+  
+  @@map("audit_logs")
+}
+
+enum PaymentStatus {
+  PENDING
+  CLEARED
+  AUTO_CLEARED
+  UNCLEARED
+  REVIEW_REQUIRED
+  MANUAL_POSTED
+  REVERTED
+}
